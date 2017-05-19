@@ -83,10 +83,8 @@ def train(data,model,criterion,optimizer):
     # Loop sequence length (train)
     for i in tqdm(range(0,data.size(1)-1,args.bptt),desc='> Train',ncols=100,ascii=True):
 
-        # Get the chunk
+        # Get the chunk and wrap the variables into the gradient propagation chain + move them to the GPU
         seqlen=int(np.min([args.bptt,data.size(1)-1-i]))
-
-        # Wrap the variables into the gradient propagation chain and move them to the GPU
         x=torch.autograd.Variable(data[:,i:i+seqlen]).cuda()
         y=torch.autograd.Variable(data[:,i+1:i+seqlen+1]).cuda()
 
@@ -117,10 +115,8 @@ def eval(data,model,criterion):
     num_loss=0
     for i in tqdm(range(0,data.size(1)-1,args.bptt),desc='> Eval',ncols=100,ascii=True):
 
-        # Get the chunk
+        # Get the chunk and wrap the variables into the gradient propagation chain + move them to the GPU
         seqlen=int(np.min([args.bptt,data.size(1)-1-i]))
-
-        # Wrap the variables into the gradient propagation chain and move them to the GPU
         x=torch.autograd.Variable(data[:,i:i+seqlen],volatile=True).cuda()
         y=torch.autograd.Variable(data[:,i+1:i+seqlen+1],volatile=True).cuda()
 
