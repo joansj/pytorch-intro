@@ -12,9 +12,9 @@ class BasicRNNLM(torch.nn.Module):
 
         # Configuration of our model
         self.num_layers=2
-        embedding_size=512
-        self.hidden_size=1024
-        dropout_prob=0.4
+        embedding_size=650
+        self.hidden_size=650
+        dropout_prob=0.5
 
         # Define embedding layer
         self.embed=torch.nn.Embedding(vocabulary_size,embedding_size)
@@ -28,17 +28,25 @@ class BasicRNNLM(torch.nn.Module):
         # Define output layer
         self.fc=torch.nn.Linear(self.hidden_size,vocabulary_size)
 
+        # Init weights
+        init_range=0.1
+        self.embed.weight.data.uniform_(-init_range,init_range)
+        self.fc.bias.data.fill_(0)
+        self.fc.weight.data.uniform_(-init_range,init_range)
+
         return
 
     def forward(self,x,h):
         # Apply embedding (encoding)
-        y=self.drop(self.embed(x))
+        y=self.embed(x)
         # Run LSTM
+        y=self.drop(y)
         y,h=self.lstm(y,h)
+        y=self.drop(y)
         # Reshape
         y=y.contiguous().view(-1,self.hidden_size)
         # Fully-connected (decoding)
-        y=self.fc(self.drop(y))
+        y=self.fc(y)
         # Return prediction and states
         return y,h
 

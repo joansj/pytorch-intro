@@ -8,10 +8,11 @@ parser=argparse.ArgumentParser(description='Main script using CIFAR-10')
 parser.add_argument('--seed',default=333,type=int,required=False,help='(default=%(default)d)')
 parser.add_argument('--filename_in',default='../dat/ptb.pkl',type=str,required=False,help='(default=%(default)s)')
 parser.add_argument('--batch_size',default=20,type=int,required=False,help='(default=%(default)d)')
-parser.add_argument('--num_epochs',default=100,type=int,required=False,help='(default=%(default)d)')
-parser.add_argument('--patience',default=3,type=int,required=False,help='(default=%(default)d)')
-parser.add_argument('--learning_rate',default=1e-3,type=float,required=False,help='(default=%(default)f)')
+parser.add_argument('--num_epochs',default=40,type=int,required=False,help='(default=%(default)d)')
 parser.add_argument('--bptt',default=35,type=int,required=False,help='(default=%(default)d)')
+parser.add_argument('--learning_rate',default=20,type=float,required=False,help='(default=%(default)f)')
+parser.add_argument('--clip_norm',default=0.25,type=float,required=False,help='(default=%(default)f)')
+parser.add_argument('--anneal_factor',default=2.0,type=float,required=False,help='(default=%(default)f)')
 args=parser.parse_args()
 print '*'*100,'\n',args,'\n','*'*100
 
@@ -67,7 +68,7 @@ model=ptb_model.BasicRNNLM(vocabulary_size).cuda()
 criterion=torch.nn.CrossEntropyLoss(size_average=False)
 
 # Define optimizer
-optimizer=torch.optim.Adam(model.parameters(),lr=args.learning_rate)
+optimizer=torch.optim.SGD(model.parameters(),lr=args.learning_rate)
 
 ########################################################################################################################
 # Train/test routines
@@ -78,7 +79,7 @@ def train(data,model,criterion,optimizer):
     # Set model to training mode (we're using dropout)
     model.train()
     # Get initial hidden and memory states
-    states=model.get_initial_states(args.batch_size)
+    states=model.get_initial_states(data.size(0))
 
     # Loop sequence length (train)
     for i in tqdm(range(0,data.size(1)-1,args.bptt),desc='> Train',ncols=100,ascii=True):
@@ -89,7 +90,7 @@ def train(data,model,criterion,optimizer):
         y=torch.autograd.Variable(data[:,i+1:i+seqlen+1]).cuda()
 
         # Truncated backpropagation
-        states=model.detach(states)
+        states=model.detach(states)     # Otherwise the model would try to backprop all the way to the start of the data set
 
         # Forward pass
         logits,states=model.forward(x,states)
@@ -98,6 +99,7 @@ def train(data,model,criterion,optimizer):
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm(model.parameters(),args.clip_norm)
         optimizer.step()
 
     return model
@@ -108,7 +110,7 @@ def eval(data,model,criterion):
     # Set model to evaluation mode (we're using dropout)
     model.eval()
     # Get initial hidden and memory states
-    states=model.get_initial_states(args.batch_size)
+    states=model.get_initial_states(data.size(0))
 
     # Loop sequence length (validation)
     total_loss=0
@@ -119,6 +121,9 @@ def eval(data,model,criterion):
         seqlen=int(np.min([args.bptt,data.size(1)-1-i]))
         x=torch.autograd.Variable(data[:,i:i+seqlen],volatile=True).cuda()
         y=torch.autograd.Variable(data[:,i+1:i+seqlen+1],volatile=True).cuda()
+
+        # Truncated backpropagation
+        states=model.detach(states)     # Otherwise the model would try to backprop all the way to the start of the data set
 
         # Forward pass
         logits,states=model.forward(x,states)
@@ -137,29 +142,28 @@ def eval(data,model,criterion):
 print 'Train...'
 
 # Loop training epochs
-loss_vals=[]
-patience=args.patience
+lr=args.learning_rate
+best_val_loss=np.inf
 for e in tqdm(range(args.num_epochs),desc='Epoch',ncols=100,ascii=True):
 
     # Train
     model=train(data_train,model,criterion,optimizer)
 
     # Validation
-    l=eval(data_valid,model,criterion)
-    loss_vals.append(l)
+    val_loss=eval(data_valid,model,criterion)
+
+    # Anneal learning rate
+    if val_loss<best_val_loss:
+        best_val_loss=val_loss
+    else:
+        lr/=args.anneal_factor
+        optimizer=torch.optim.SGD(model.parameters(),lr=lr)
 
     # Test
-    loss_test=eval(data_test,model,criterion)
+    test_loss=eval(data_test,model,criterion)
 
     # Report
-    msg='Epoch %d: \tValid loss=%.4f \tTest loss=%.4f \tTest perplexity=%.1f'%(e+1,loss_vals[-1],loss_test,np.exp(loss_test))
-    if len(loss_vals)>1:
-        if loss_vals[-1]<=np.min(loss_vals[:-1]):
-            patience=args.patience
-            msg+=' \t(*)'
-        else:
-            patience-=1
+    msg='Epoch %d: \tValid loss=%.4f \tTest loss=%.4f \tTest perplexity=%.1f'%(e+1,val_loss,test_loss,np.exp(test_loss))
     tqdm.write(msg)
-    if patience==0: break
 
 ########################################################################################################################
